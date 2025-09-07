@@ -1,0 +1,29 @@
+---
+import AboutHeroImage from "../assets/photo2-gd.jpg";
+import Layout from "../layouts/Page.astro";
+import Calendar, { type CalendarEvent } from "../components/Calendar.astro";
+import { events } from "../consts";
+---
+
+<Layout
+    title="Schedule"
+    description="A page about the meeting and events schedule of Stonnall and Shenstone Camera Club"
+    pubDate={new Date("1 September 2025")}
+    heroImage={AboutHeroImage}
+    heroImageCaption="By Gail Dawson, SSCC member"
+    heroImageCaptionColour="white"
+>
+    <p>
+        Our schedule is made up of <a href="/regular-meetings"
+            >regular meetings</a
+        > and (forthcoming) special events. The list below shows all the events and
+        meetings scheduled for the next four months. Click an event to learn more.
+    </p>
+
+    <Calendar
+        events={events}
+        defaultView="list"
+        monthsToShow={4}
+        debug={true}
+    />
+</Layout>

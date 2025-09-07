@@ -1,0 +1,1318 @@
+---
+// Calendar.astro
+// <!-- Show all events -->
+/* <Calendar events={events} />
+
+<!-- Show only meetings -->
+<Calendar events={events} tags={["meeting"]} />
+
+<!-- Show meetings and personal events -->
+<Calendar events={events} tags={["meeting", "personal"]} />
+
+<!-- Widget showing next meeting only -->
+<Calendar
+  events={events}
+  tags={["meeting"]}
+  maxEvents={1}
+  defaultView="list"
+  hideViewToggle={true}
+/>
+
+<!-- Calendar with links disabled -->
+<Calendar events={events} disableLinks={true} />
+
+const events: CalendarEvent[] = [
+  {
+    date: "2025-09-08",
+    title: "Team Standup",
+    startTime: "09:00",
+    duration: 30,
+    location: "Conference Room A",
+    tags: ["meeting", "daily", "team"],
+    color: "#1976d2",
+    url: "/meetings/standup"
+  },
+  {
+    date: "2025-09-08",
+    title: "Project Review",
+    startTime: "14:30",
+    duration: 90,
+    location: "Zoom Meeting",
+    tags: ["meeting", "review", "quarterly"],
+    color: "#d32f2f"
+  },
+  {
+    date: "2025-09-09",
+    title: "Personal Appointment",
+    startTime: "10:00",
+    duration: 60,
+    location: "Medical Center",
+    tags: ["personal", "health"],
+    color: "#388e3c"
+  }
+];
+*/
+
+export interface CalendarEvent {
+    date: string; // Format: 'YYYY-MM-DD'
+    title: string;
+    description?: string;
+    location?: string; // Optional location information
+    color?: string; // Optional custom color for the event
+    url?: string; // Optional URL to navigate to when clicked
+    openInNewTab?: boolean; // Whether to open URL in new tab (default: false)
+    startTime?: string; // Format: 'HH:MM' (24-hour format)
+    duration?: number; // Duration in minutes
+    tags?: string[]; // Optional array of tags for filtering
+}
+
+export interface Props {
+    events: CalendarEvent[];
+    monthsToShow?: number; // Default to 3 months
+    startMonth?: string; // Format: 'YYYY-MM', defaults to current month
+    defaultView?: "calendar" | "list"; // Default view mode
+    maxEvents?: number; // Maximum number of events to show (useful for "next event" widgets)
+    hideViewToggle?: boolean; // Hide the view toggle buttons
+    debug?: boolean; // Enable debug console output
+    tags?: string[]; // Optional array of tags to filter by
+    disableLinks?: boolean; // Disable all event linking functionality
+}
+
+interface CalendarDay {
+    date: number;
+    fullDate: string; // YYYY-MM-DD format
+    isCurrentMonth: boolean;
+    events: CalendarEvent[];
+}
+
+interface CalendarMonth {
+    name: string;
+    year: number;
+    monthIndex: number;
+    days: CalendarDay[];
+}
+
+const {
+    events = [],
+    monthsToShow = 3,
+    startMonth,
+    defaultView = "calendar",
+    maxEvents,
+    hideViewToggle = false,
+    debug = false,
+    tags = [],
+    disableLinks = false,
+} = Astro.props;
+
+function parseDate(dateStr: string): Date {
+    return new Date(dateStr + "T00:00:00");
+}
+
+function parseTime(timeStr: string): number {
+    if (!timeStr) return 0;
+    const [hours, minutes] = timeStr.split(":").map(Number);
+    return hours * 60 + minutes; // Convert to minutes since midnight
+}
+
+function formatTime(timeStr?: string): string {
+    if (!timeStr) return "";
+    const [hours, minutes] = timeStr.split(":").map(Number);
+    const period = hours >= 12 ? "PM" : "AM";
+    const displayHours = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+    return `${displayHours}:${minutes.toString().padStart(2, "0")} ${period}`;
+}
+
+function formatDuration(durationMinutes?: number): string {
+    if (!durationMinutes) return "";
+    const hours = Math.floor(durationMinutes / 60);
+    const minutes = durationMinutes % 60;
+    if (hours === 0) return `${minutes}m`;
+    if (minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
+}
+
+function formatEventTime(event: CalendarEvent): string {
+    if (!event.startTime) return "";
+    let timeStr = formatTime(event.startTime);
+    if (event.duration) {
+        timeStr += ` (${formatDuration(event.duration)})`;
+    }
+    return timeStr;
+}
+
+function filterEventsByTags(
+    events: CalendarEvent[],
+    filterTags: string[],
+): CalendarEvent[] {
+    if (filterTags.length === 0) {
+        return events;
+    }
+
+    return events.filter((event) => {
+        if (!event.tags || event.tags.length === 0) {
+            return false; // Events without tags are excluded when filtering
+        }
+
+        // Check if event has at least one of the filter tags
+        return filterTags.some((filterTag) => event.tags!.includes(filterTag));
+    });
+}
+
+function formatDateKey(date: Date): string {
+    return (
+        date.getFullYear() +
+        "-" +
+        String(date.getMonth() + 1).padStart(2, "0") +
+        "-" +
+        String(date.getDate()).padStart(2, "0")
+    );
+}
+
+function getEventsForDate(
+    dateStr: string,
+    allEvents: CalendarEvent[],
+): CalendarEvent[] {
+    const eventsForDate = allEvents.filter((event) => event.date === dateStr);
+
+    // Sort events by start time (events with no start time go last)
+    return eventsForDate.sort((a, b) => {
+        if (!a.startTime && !b.startTime) return 0;
+        if (!a.startTime) return 1;
+        if (!b.startTime) return -1;
+        return parseTime(a.startTime) - parseTime(b.startTime);
+    });
+}
+
+function generateCalendarMonth(
+    year: number,
+    month: number,
+    allEvents: CalendarEvent[],
+): CalendarMonth {
+    const monthNames = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0); // Last day of the current month
+
+    // Calculate the start date (Sunday of the week containing the 1st)
+    const startDate = new Date(firstDay);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+
+    // Calculate the end date (Saturday of the week containing the last day)
+    const endDate = new Date(lastDay);
+    endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
+
+    // Calculate the number of days needed
+    const totalDays = Math.ceil(
+        (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
+    );
+
+    const days: CalendarDay[] = [];
+
+    // Generate only the necessary days to show complete weeks
+    for (let i = 0; i < totalDays; i++) {
+        const currentDate = new Date(startDate);
+        currentDate.setDate(startDate.getDate() + i);
+
+        const isCurrentMonth = currentDate.getMonth() === month;
+        const dayNumber = currentDate.getDate();
+        const fullDate = formatDateKey(currentDate);
+        const dayEvents = getEventsForDate(fullDate, allEvents);
+
+        days.push({
+            date: dayNumber,
+            fullDate,
+            isCurrentMonth,
+            events: dayEvents,
+        });
+    }
+
+    return {
+        name: monthNames[month],
+        year,
+        monthIndex: month,
+        days,
+    };
+}
+
+// Determine starting month
+let startYear: number;
+let startMonthIndex: number;
+
+if (startMonth) {
+    const [yearStr, monthStr] = startMonth.split("-");
+    startYear = parseInt(yearStr);
+    startMonthIndex = parseInt(monthStr) - 1; // Convert to 0-based index
+} else {
+    const now = new Date();
+    startYear = now.getFullYear();
+    startMonthIndex = now.getMonth();
+}
+
+// Generate list of events for the time period
+function generateEventList(
+    allEvents: CalendarEvent[],
+    startYear: number,
+    startMonthIndex: number,
+    monthCount: number,
+    maxEvents?: number,
+) {
+    // Use actual current date
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    if (maxEvents) {
+        // For maxEvents mode, show only future events (events that haven't finished yet)
+        const currentDateTime = new Date(); // Current date and time
+
+        return allEvents
+            .filter((event) => {
+                const eventDate = parseDate(event.date);
+
+                // If event has no start time or duration, just check if it's today or future
+                if (!event.startTime || !event.duration) {
+                    return eventDate >= now;
+                }
+
+                // Calculate event end time
+                const eventStartMinutes = parseTime(event.startTime);
+                const eventEndMinutes = eventStartMinutes + event.duration;
+
+                // Create a full datetime for when the event ends
+                const eventEndDateTime = new Date(eventDate);
+                eventEndDateTime.setHours(Math.floor(eventEndMinutes / 60));
+                eventEndDateTime.setMinutes(eventEndMinutes % 60);
+
+                // Only include events that haven't finished yet
+                return eventEndDateTime > currentDateTime;
+            })
+            .sort((a, b) => {
+                // First sort by date
+                const dateCompare =
+                    parseDate(a.date).getTime() - parseDate(b.date).getTime();
+                if (dateCompare !== 0) return dateCompare;
+
+                // Then sort by time for same-day events
+                if (!a.startTime && !b.startTime) return 0;
+                if (!a.startTime) return 1;
+                if (!b.startTime) return -1;
+                return parseTime(a.startTime) - parseTime(b.startTime);
+            })
+            .slice(0, maxEvents);
+    } else {
+        // Regular mode - show events in date range
+        const startDate = new Date(startYear, startMonthIndex, 1);
+        const endDate = new Date(startYear, startMonthIndex + monthCount, 0);
+
+        return allEvents
+            .filter((event) => {
+                const eventDate = parseDate(event.date);
+                return eventDate >= startDate && eventDate <= endDate;
+            })
+            .sort((a, b) => {
+                // First sort by date
+                const dateCompare =
+                    parseDate(a.date).getTime() - parseDate(b.date).getTime();
+                if (dateCompare !== 0) return dateCompare;
+
+                // Then sort by time for same-day events
+                if (!a.startTime && !b.startTime) return 0;
+                if (!a.startTime) return 1;
+                if (!b.startTime) return -1;
+                return parseTime(a.startTime) - parseTime(b.startTime);
+            });
+    }
+}
+
+function formatEventDate(dateStr: string): {
+    dayName: string;
+    date: string;
+    monthAbbr: string;
+    year: string;
+    displayDate: string;
+} {
+    const date = parseDate(dateStr);
+    const dayNames = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+    const monthNames = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    const monthAbbreviations = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ];
+
+    const dayName = dayNames[date.getDay()];
+    const dayNumber = date.getDate();
+    const monthName = monthNames[date.getMonth()];
+    const monthAbbr = monthAbbreviations[date.getMonth()];
+    const yearNumber = date.getFullYear();
+
+    return {
+        dayName: dayName,
+        date: dayNumber.toString(),
+        monthAbbr: monthAbbr,
+        year: yearNumber.toString(),
+        displayDate: `${dayName} ${dayNumber} ${monthName} ${yearNumber}`,
+    };
+}
+
+// Apply tag filtering if tags are specified
+const filteredEvents = filterEventsByTags(events, tags);
+
+// Generate list view data
+const eventList = generateEventList(
+    filteredEvents,
+    startYear,
+    startMonthIndex,
+    monthsToShow,
+    maxEvents,
+);
+
+// Generate the specified number of months (only if not in maxEvents mode)
+const months: CalendarMonth[] = [];
+if (!maxEvents) {
+    for (let i = 0; i < monthsToShow; i++) {
+        const monthDate = new Date(startYear, startMonthIndex + i, 1);
+        months.push(
+            generateCalendarMonth(
+                monthDate.getFullYear(),
+                monthDate.getMonth(),
+                filteredEvents,
+            ),
+        );
+    }
+}
+
+const dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+---
+
+<div
+    class="calendar-wrapper"
+    data-max-events={maxEvents || "none"}
+    data-hide-toggle={hideViewToggle}
+    data-default-view={defaultView}
+    data-debug={debug}
+    data-disable-links={disableLinks}
+>
+    <!-- View Toggle -->
+    {
+        !hideViewToggle && (
+            <div class="view-toggle">
+                <button
+                    class={`view-btn ${defaultView === "calendar" ? "active" : ""}`}
+                    data-view="calendar"
+                    type="button"
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z" />
+                    </svg>
+                    Calendar
+                </button>
+                <button
+                    class={`view-btn ${defaultView === "list" ? "active" : ""}`}
+                    data-view="list"
+                    type="button"
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
+                    </svg>
+                    List
+                </button>
+            </div>
+        )
+    }
+
+    <!-- Calendar View -->
+    <div
+        class="calendar-view"
+        id="calendar-view"
+        style={defaultView === "list" || maxEvents ? "display: none;" : ""}
+    >
+        {
+            !maxEvents &&
+                months.map((month) => (
+                    <div class="month-calendar">
+                        <div class="month-header">
+                            <h2>
+                                {month.name} {month.year}
+                            </h2>
+                        </div>
+
+                        <div class="calendar-grid">
+                            {dayHeaders.map((day) => (
+                                <div class="day-header">{day}</div>
+                            ))}
+
+                            {month.days.map((day) => (
+                                <div
+                                    class={`calendar-day ${!day.isCurrentMonth ? "other-month" : ""} ${day.events.length > 0 ? "has-event" : ""}`}
+                                >
+                                    <span class="day-number">{day.date}</span>
+                                    {day.events.map((event) => (
+                                        <div
+                                            class={`event ${!disableLinks && event.url ? "clickable" : ""}`}
+                                            style={
+                                                event.color
+                                                    ? `--event-color: ${event.color}`
+                                                    : ""
+                                            }
+                                            data-url={
+                                                !disableLinks
+                                                    ? event.url || ""
+                                                    : ""
+                                            }
+                                            data-new-tab={
+                                                !disableLinks &&
+                                                event.openInNewTab
+                                                    ? "true"
+                                                    : "false"
+                                            }
+                                        >
+                                            <div class="event-dot" />
+                                            <div class="event-content">
+                                                <div class="event-title">
+                                                    {event.title}
+                                                </div>
+                                                {formatEventTime(event) && (
+                                                    <div class="event-time">
+                                                        {formatEventTime(event)}
+                                                    </div>
+                                                )}
+                                                {event.location && (
+                                                    <div class="event-location">
+                                                        <svg
+                                                            width="10"
+                                                            height="10"
+                                                            viewBox="0 0 24 24"
+                                                            fill="currentColor"
+                                                            class="location-icon"
+                                                        >
+                                                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                                                        </svg>
+                                                        {event.location}
+                                                    </div>
+                                                )}
+                                                {event.description && (
+                                                    <div class="event-description">
+                                                        {event.description}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))
+        }
+    </div>
+
+    <!-- List View -->
+    <div
+        class="list-view"
+        id="list-view"
+        style={defaultView === "calendar" && !maxEvents ? "display: none;" : ""}
+    >
+        <div class="event-list">
+            {
+                eventList.length === 0 ? (
+                    <div class="no-events">
+                        <p>
+                            {maxEvents
+                                ? "No upcoming events"
+                                : "No events scheduled for this period"}
+                        </p>
+                    </div>
+                ) : (
+                    eventList.map((event, index) => {
+                        const dateInfo = formatEventDate(event.date);
+                        const prevEvent =
+                            index > 0 ? eventList[index - 1] : null;
+                        const showDateHeader =
+                            !prevEvent || prevEvent.date !== event.date;
+
+                        return (
+                            <div class="list-item">
+                                {showDateHeader && (
+                                    <div class="date-header">
+                                        <div class="date-circle">
+                                            <div class="date-number">
+                                                {dateInfo.date}
+                                            </div>
+                                            <div class="date-month">
+                                                {dateInfo.monthAbbr}
+                                            </div>
+                                        </div>
+                                        <div class="date-info">
+                                            <div class="day-name">
+                                                {dateInfo.displayDate}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                <div
+                                    class={`list-event ${!disableLinks && event.url ? "clickable" : ""}`}
+                                    style={
+                                        event.color
+                                            ? `--event-color: ${event.color}`
+                                            : ""
+                                    }
+                                    data-url={
+                                        !disableLinks ? event.url || "" : ""
+                                    }
+                                    data-new-tab={
+                                        !disableLinks && event.openInNewTab
+                                            ? "true"
+                                            : "false"
+                                    }
+                                >
+                                    <div class="event-marker" />
+                                    <div class="event-details">
+                                        <div class="event-title">
+                                            {event.title}
+                                        </div>
+                                        {formatEventTime(event) && (
+                                            <div class="event-time">
+                                                {formatEventTime(event)}
+                                            </div>
+                                        )}
+                                        {event.location && (
+                                            <div class="event-location">
+                                                <svg
+                                                    width="14"
+                                                    height="14"
+                                                    viewBox="0 0 24 24"
+                                                    fill="currentColor"
+                                                    class="location-icon"
+                                                >
+                                                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                                                </svg>
+                                                {event.location}
+                                            </div>
+                                        )}
+                                        {event.description && (
+                                            <div class="event-description">
+                                                {event.description}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {!disableLinks && event.url && (
+                                        <div class="event-arrow">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="currentColor"
+                                            >
+                                                <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z" />
+                                            </svg>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })
+                )
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .calendar-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        padding: 1rem;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    /* View Toggle */
+    .view-toggle {
+        display: flex;
+        justify-content: center;
+        background: white;
+        border-radius: 8px;
+        padding: 4px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        width: fit-content;
+        margin: 0 auto;
+    }
+
+    .view-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1.5rem;
+        border: none;
+        background: transparent;
+        color: #6c757d;
+        font-weight: 500;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.875rem;
+    }
+
+    .view-btn:hover {
+        background: #f8f9fa;
+        color: #495057;
+    }
+
+    .view-btn.active {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+    }
+
+    .view-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    /* Calendar View */
+    .calendar-view {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .month-calendar {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+
+    .month-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .month-header h2 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+
+    .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+    }
+
+    .day-header {
+        background: #f8f9fa;
+        padding: 0.75rem 0.5rem;
+        text-align: center;
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: #6c757d;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .calendar-day {
+        min-height: 100px;
+        border-right: 1px solid #e9ecef;
+        border-bottom: 1px solid #e9ecef;
+        padding: 0.5rem;
+        position: relative;
+        transition: background-color 0.2s ease;
+        overflow-y: auto;
+    }
+
+    .calendar-day:hover {
+        background-color: #f8f9fa;
+    }
+
+    .calendar-day:nth-child(7n) {
+        border-right: none;
+    }
+
+    .day-number {
+        font-weight: 500;
+        font-size: 0.875rem;
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+
+    .other-month .day-number {
+        color: #adb5bd;
+    }
+
+    .has-event {
+        background-color: #e3f2fd;
+    }
+
+    .has-event:hover {
+        background-color: #bbdefb;
+    }
+
+    .event {
+        --event-color: #1976d2;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.25rem;
+        margin-bottom: 0.5rem;
+        padding: 0.25rem;
+        border-radius: 4px;
+        background-color: color-mix(
+            in srgb,
+            var(--event-color) 10%,
+            transparent
+        );
+        border-left: 3px solid var(--event-color);
+    }
+
+    .event:last-child {
+        margin-bottom: 0;
+    }
+
+    .event-dot {
+        display: none;
+    }
+
+    .event-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .event-title {
+        font-size: 0.75rem;
+        color: var(--event-color);
+        font-weight: 600;
+        line-height: 1.2;
+        word-wrap: break-word;
+    }
+
+    .event-time {
+        font-size: 0.7rem;
+        color: var(--event-color);
+        font-weight: 500;
+        line-height: 1.1;
+        margin-top: 0.125rem;
+        opacity: 0.9;
+    }
+
+    .event-location {
+        font-size: 0.7rem;
+        color: color-mix(in srgb, var(--event-color) 85%, black);
+        font-weight: 500;
+        line-height: 1.1;
+        margin-top: 0.125rem;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        opacity: 0.9;
+    }
+
+    .location-icon {
+        flex-shrink: 0;
+        opacity: 0.8;
+    }
+
+    .event-description {
+        font-size: 0.7rem;
+        color: color-mix(in srgb, var(--event-color) 80%, black);
+        line-height: 1.1;
+        margin-top: 0.125rem;
+        word-wrap: break-word;
+    }
+
+    .other-month .event {
+        opacity: 0.5;
+    }
+
+    .event.clickable {
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .event.clickable:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        background-color: color-mix(
+            in srgb,
+            var(--event-color) 20%,
+            transparent
+        );
+    }
+
+    .event.clickable:active {
+        transform: translateY(0);
+    }
+
+    /* List View */
+    .list-view {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+
+    .event-list {
+        padding: 1rem;
+    }
+
+    .no-events {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: #6c757d;
+    }
+
+    .no-events p {
+        margin: 0;
+        font-size: 1.125rem;
+    }
+
+    .list-item {
+        margin-bottom: 1rem;
+    }
+
+    .list-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .date-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .date-circle {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 50px;
+        height: 50px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        flex-shrink: 0;
+    }
+
+    .date-number {
+        font-size: 1.25rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .date-month {
+        font-size: 0.75rem;
+        font-weight: 500;
+        line-height: 1;
+        opacity: 0.9;
+    }
+
+    .date-info {
+        flex: 1;
+    }
+
+    .day-name {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #495057;
+    }
+
+    .list-event {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+        margin-bottom: 0.5rem;
+        border-radius: 8px;
+        background: #f8f9fa;
+        transition: all 0.2s ease;
+        border-left: 4px solid var(--event-color, #1976d2);
+    }
+
+    .list-event:last-child {
+        margin-bottom: 0;
+    }
+
+    .list-event.clickable {
+        cursor: pointer;
+    }
+
+    .list-event.clickable:hover {
+        background: #e9ecef;
+        transform: translateX(4px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .event-marker {
+        display: none;
+    }
+
+    .event-details {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .list-event .event-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #212529;
+        margin-bottom: 0.25rem;
+        line-height: 1.3;
+    }
+
+    .list-event .event-time {
+        font-size: 0.875rem;
+        color: #667eea;
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+        line-height: 1.2;
+    }
+
+    .list-event .event-location {
+        font-size: 0.875rem;
+        color: #28a745;
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+        line-height: 1.2;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .list-event .location-icon {
+        flex-shrink: 0;
+        opacity: 0.8;
+    }
+
+    .list-event .event-description {
+        font-size: 0.875rem;
+        color: #6c757d;
+        line-height: 1.4;
+        margin: 0;
+    }
+
+    .event-arrow {
+        color: #adb5bd;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+
+    .list-event.clickable:hover .event-arrow {
+        opacity: 1;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .calendar-wrapper {
+            padding: 0.5rem;
+            gap: 1rem;
+        }
+
+        .calendar-day {
+            min-height: 80px;
+            padding: 0.25rem;
+        }
+
+        .month-header {
+            padding: 1rem;
+        }
+
+        .month-header h2 {
+            font-size: 1.25rem;
+        }
+
+        .day-header {
+            padding: 0.5rem 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        .event-title {
+            font-size: 0.7rem;
+        }
+
+        .event-location {
+            font-size: 0.65rem;
+        }
+
+        .location-icon {
+            width: 8px;
+            height: 8px;
+        }
+
+        .event-description {
+            font-size: 0.65rem;
+        }
+
+        .view-btn {
+            padding: 0.5rem 1rem;
+            font-size: 0.8rem;
+        }
+
+        .list-event .event-location {
+            font-size: 0.8rem;
+        }
+
+        .list-event .location-icon {
+            width: 12px;
+            height: 12px;
+        }
+    }
+
+    /* Handle many events in a day */
+    .calendar-day:has(.event:nth-child(4)) {
+        min-height: 120px;
+    }
+
+    .calendar-day:has(.event:nth-child(6)) {
+        min-height: 140px;
+    }
+
+    /* Adjust calendar day height for events with location */
+    .calendar-day:has(.event .event-location) {
+        min-height: 110px;
+    }
+
+    .calendar-day:has(.event:nth-child(3) .event-location) {
+        min-height: 130px;
+    }
+
+    .calendar-day:has(.event:nth-child(4) .event-location) {
+        min-height: 150px;
+    }
+</style>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        // Check if debugging is enabled
+        const wrapper = document.querySelector(".calendar-wrapper");
+        const isDebug = wrapper?.getAttribute("data-debug") === "true";
+        const disableLinks =
+            wrapper?.getAttribute("data-disable-links") === "true";
+
+        function debugLog(...args) {
+            if (isDebug) {
+                console.log(...args);
+            }
+        }
+
+        debugLog("Calendar script loaded - DOM ready");
+        debugLog("Links disabled:", disableLinks);
+
+        // Debug all calendar instances
+        const allWrappers = document.querySelectorAll(".calendar-wrapper");
+        debugLog("Total calendar instances found:", allWrappers.length);
+
+        allWrappers.forEach((wrapper, index) => {
+            const maxEvents = wrapper.getAttribute("data-max-events");
+            const hideToggle = wrapper.getAttribute("data-hide-toggle");
+            const defaultView = wrapper.getAttribute("data-default-view");
+            const debug = wrapper.getAttribute("data-debug");
+            const disableLinks = wrapper.getAttribute("data-disable-links");
+
+            debugLog(`Calendar ${index + 1}:`, {
+                maxEvents,
+                hideToggle,
+                defaultView,
+                debug,
+                disableLinks,
+                hasToggle: wrapper.querySelector(".view-toggle") ? "yes" : "no",
+                listEvents: wrapper.querySelectorAll(".list-event").length,
+            });
+        });
+
+        // Find elements with more specific selectors
+        const viewButtons = document.querySelectorAll(".view-btn");
+        const calendarView = document.getElementById("calendar-view");
+        const listView = document.getElementById("list-view");
+
+        debugLog("View buttons found:", viewButtons.length);
+        debugLog("Calendar view found:", !!calendarView);
+        debugLog("List view found:", !!listView);
+
+        // Debug initial visibility
+        if (calendarView) {
+            debugLog(
+                "Calendar view initial display:",
+                window.getComputedStyle(calendarView).display,
+            );
+        }
+        if (listView) {
+            debugLog(
+                "List view initial display:",
+                window.getComputedStyle(listView).display,
+            );
+        }
+
+        // Debug list events
+        const listEventElements = document.querySelectorAll(".list-event");
+        debugLog("List events found in DOM:", listEventElements.length);
+        listEventElements.forEach((event, index) => {
+            const title = event.querySelector(".event-title")?.textContent;
+            debugLog(`List event ${index + 1}: ${title}`);
+        });
+
+        if (viewButtons.length === 0) {
+            debugLog(
+                "No view buttons found - this is widget mode with hideViewToggle=true",
+            );
+        } else {
+            debugLog(
+                "View toggle buttons are visible - hideViewToggle is false or not set",
+            );
+        }
+
+        // Handle view switching
+        viewButtons.forEach((btn, index) => {
+            debugLog(
+                `View button ${index + 1}:`,
+                btn.getAttribute("data-view"),
+            );
+
+            btn.addEventListener("click", function () {
+                const targetView = this.getAttribute("data-view");
+                debugLog("Switching to view:", targetView);
+
+                // Update active button
+                viewButtons.forEach((b) => b.classList.remove("active"));
+                this.classList.add("active");
+
+                // Switch views
+                if (targetView === "calendar") {
+                    if (calendarView) {
+                        calendarView.style.display = "";
+                        debugLog("Calendar view shown");
+                    }
+                    if (listView) {
+                        listView.style.display = "none";
+                        debugLog("List view hidden");
+                    }
+                } else {
+                    if (calendarView) {
+                        calendarView.style.display = "none";
+                        debugLog("Calendar view hidden");
+                    }
+                    if (listView) {
+                        listView.style.display = "";
+                        debugLog("List view shown");
+                    }
+                }
+            });
+        });
+
+        // Handle events only if links are not disabled
+        if (!disableLinks) {
+            function setupEventHandler(element, debugName) {
+                element.addEventListener("click", function (e) {
+                    debugLog(`${debugName} clicked!`);
+
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const url = this.getAttribute("data-url");
+                    const newTab = this.getAttribute("data-new-tab") === "true";
+
+                    if (url) {
+                        debugLog("Navigating to:", url, "New tab:", newTab);
+                        if (newTab) {
+                            window.open(url, "_blank", "noopener,noreferrer");
+                        } else {
+                            window.location.href = url;
+                        }
+                    }
+                });
+
+                element.setAttribute("tabindex", "0");
+                element.setAttribute("role", "button");
+
+                element.addEventListener("keydown", function (e) {
+                    if (e.key === "Enter" || e.key === " ") {
+                        debugLog(`${debugName} keyboard navigation triggered`);
+                        e.preventDefault();
+                        this.click();
+                    }
+                });
+            }
+
+            // Setup calendar events
+            const calendarEvents = document.querySelectorAll(
+                ".calendar-view .event.clickable",
+            );
+            debugLog("Found calendar clickable events:", calendarEvents.length);
+            calendarEvents.forEach((event, index) => {
+                setupEventHandler(event, `calendar-event-${index + 1}`);
+            });
+
+            // Setup list events
+            const listEventClickables = document.querySelectorAll(
+                ".list-event.clickable",
+            );
+            debugLog(
+                "Found list clickable events:",
+                listEventClickables.length,
+            );
+            listEventClickables.forEach((event, index) => {
+                setupEventHandler(event, `list-event-${index + 1}`);
+            });
+        } else {
+            debugLog("Event handlers skipped - links are disabled");
+        }
+
+        debugLog("Calendar script setup complete");
+    });
+</script>

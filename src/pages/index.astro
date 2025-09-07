@@ -1,49 +1,63 @@
 ---
-import BaseHead from '../components/BaseHead.astro';
-import Footer from '../components/Footer.astro';
-import Header from '../components/Header.astro';
-import { SITE_DESCRIPTION, SITE_TITLE } from '../consts';
+import AboutHeroImage from "../assets/photo1-dt.jpg";
+import Layout from "../layouts/Page.astro";
+import Calendar, { type CalendarEvent } from "../components/Calendar.astro";
+import { events, documents } from "../consts";
+import DocumentList, { type Document } from "../components/DocumentList.astro";
 ---
 
-<!doctype html>
-<html lang="en">
-	<head>
-		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-	</head>
-	<body>
-		<Header />
-		<main>
-			<h1>🧑‍🚀 Hello, Astronaut!</h1>
-			<p>
-				Welcome to the official <a href="https://astro.build/">Astro</a> blog starter template. This
-				template serves as a lightweight, minimally-styled starting point for anyone looking to build
-				a personal website, blog, or portfolio with Astro.
-			</p>
-			<p>
-				This template comes with a few integrations already configured in your
-				<code>astro.config.mjs</code> file. You can customize your setup with
-				<a href="https://astro.build/integrations">Astro Integrations</a> to add tools like Tailwind,
-				React, or Vue to your project.
-			</p>
-			<p>Here are a few ideas on how to get started with the template:</p>
-			<ul>
-				<li>Edit this page in <code>src/pages/index.astro</code></li>
-				<li>Edit the site header items in <code>src/components/Header.astro</code></li>
-				<li>Add your name to the footer in <code>src/components/Footer.astro</code></li>
-				<li>Check out the included blog posts in <code>src/content/blog/</code></li>
-				<li>Customize the blog post page layout in <code>src/layouts/BlogPost.astro</code></li>
-			</ul>
-			<p>
-				Have fun! If you get stuck, remember to
-				<a href="https://docs.astro.build/">read the docs</a>
-				or <a href="https://astro.build/chat">join us on Discord</a> to ask questions.
-			</p>
-			<p>
-				Looking for a blog template with a bit more personality? Check out
-				<a href="https://github.com/Charca/astro-blog-template">astro-blog-template</a>
-				by <a href="https://twitter.com/Charca">Maxi Ferreira</a>.
-			</p>
-		</main>
-		<Footer />
-	</body>
-</html>
+<Layout
+    title="Welcome"
+    description="Stonnal & Shenstone Camera Club's Home Page"
+    pubDate={new Date("01 September 2025")}
+    heroImage={AboutHeroImage}
+    heroImageCaption="By Duaine Taylor, SSCC member"
+    heroImageCaptionColour="white"
+>
+    <h3>Next event</h3>
+    <Calendar
+        events={events}
+        maxEvents={1}
+        defaultView="list"
+        hideViewToggle={true}
+    />
+
+    <p>
+        We meet regularly. See our <a href="/schedule">event schedule</a> to see
+        what's coming up, or come along to one of our <a
+            href="/regular-meetings">regular meetings</a
+        >. You can just turn up. We look forward to seeing you!
+    </p>
+
+    <h3>About us</h3>
+    <p>
+        Welcome to the the Midlands' new and vibrant photography club, where
+        everyone is invited to explore and learn the art of photography.
+    </p>
+    <p>
+        Our welcoming community brings together enthusiasts and beginners alike,
+        united by a shared passion for capturing moments and developing creative
+        skills.
+    </p>
+    <p>
+        Whether picking up a camera (or camera phone!) for the first time or
+        seeking new inspiration, all are welcome at SSCC. Click <a
+            href="/join-us">Join</a
+        > to learn how to get involved.
+    </p>
+    <h3>Contact us</h3>
+    <p>
+        You can reach us at <a href="mailto:hello@sscc.org.uk"
+            >hello@sscc.org.uk</a
+        >. Please remember that we are a volunteer-run club and so it may take a
+        few days to respond.
+    </p>
+
+    <h3>Key docs</h3>
+    <p>These documents are coming soon.</p>
+    <DocumentList
+        documents={documents}
+        categories={["Club documents"]}
+        debug={false}
+    />
+</Layout>
