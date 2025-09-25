@@ -21,6 +21,12 @@
 <!-- Calendar with links disabled -->
 <Calendar events={events} disableLinks={true} />
 
+<!-- Calendar with past events greyed out -->
+<Calendar events={events} pastEventsDisplay="grey" />
+
+<!-- Calendar with past events hidden -->
+<Calendar events={events} pastEventsDisplay="hide" />
+
 const events: CalendarEvent[] = [
   {
     date: "2025-09-08",
@@ -76,6 +82,7 @@ export interface Props {
     debug?: boolean; // Enable debug console output
     tags?: string[]; // Optional array of tags to filter by
     disableLinks?: boolean; // Disable all event linking functionality
+    pastEventsDisplay?: "show" | "grey" | "hide"; // How to display past events: show normally, grey out, or hide
 }
 
 interface CalendarDay {
@@ -102,6 +109,7 @@ const {
     debug = false,
     tags = [],
     disableLinks = false,
+    pastEventsDisplay = "show",
 } = Astro.props;
 
 function parseDate(dateStr: string): Date {
@@ -168,11 +176,43 @@ function formatDateKey(date: Date): string {
     );
 }
 
+function isEventPast(event: CalendarEvent): boolean {
+    const now = new Date();
+    const eventDate = parseDate(event.date);
+
+    // If event has no start time or duration, just check if it's before today
+    if (!event.startTime || !event.duration) {
+        // Set both dates to start of day for comparison
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        eventDate.setHours(0, 0, 0, 0);
+        return eventDate < today;
+    }
+
+    // Calculate event end time
+    const eventStartMinutes = parseTime(event.startTime);
+    const eventEndMinutes = eventStartMinutes + event.duration;
+
+    // Create a full datetime for when the event ends
+    const eventEndDateTime = new Date(eventDate);
+    eventEndDateTime.setHours(Math.floor(eventEndMinutes / 60));
+    eventEndDateTime.setMinutes(eventEndMinutes % 60);
+
+    // Event is past if it has already ended
+    return eventEndDateTime <= now;
+}
+
 function getEventsForDate(
     dateStr: string,
     allEvents: CalendarEvent[],
+    pastEventsDisplay: string,
 ): CalendarEvent[] {
-    const eventsForDate = allEvents.filter((event) => event.date === dateStr);
+    let eventsForDate = allEvents.filter((event) => event.date === dateStr);
+
+    // Filter out past events if pastEventsDisplay is "hide"
+    if (pastEventsDisplay === "hide") {
+        eventsForDate = eventsForDate.filter((event) => !isEventPast(event));
+    }
 
     // Sort events by start time (events with no start time go last)
     return eventsForDate.sort((a, b) => {
@@ -187,6 +227,7 @@ function generateCalendarMonth(
     year: number,
     month: number,
     allEvents: CalendarEvent[],
+    pastEventsDisplay: string,
 ): CalendarMonth {
     const monthNames = [
         "January",
@@ -229,7 +270,11 @@ function generateCalendarMonth(
         const isCurrentMonth = currentDate.getMonth() === month;
         const dayNumber = currentDate.getDate();
         const fullDate = formatDateKey(currentDate);
-        const dayEvents = getEventsForDate(fullDate, allEvents);
+        const dayEvents = getEventsForDate(
+            fullDate,
+            allEvents,
+            pastEventsDisplay,
+        );
 
         days.push({
             date: dayNumber,
@@ -268,6 +313,7 @@ function generateEventList(
     startMonthIndex: number,
     monthCount: number,
     maxEvents?: number,
+    pastEventsDisplay?: string,
 ) {
     // Use actual current date
     const now = new Date();
@@ -319,7 +365,15 @@ function generateEventList(
         return allEvents
             .filter((event) => {
                 const eventDate = parseDate(event.date);
-                return eventDate >= startDate && eventDate <= endDate;
+                const inDateRange =
+                    eventDate >= startDate && eventDate <= endDate;
+
+                // Filter out past events if pastEventsDisplay is "hide"
+                if (pastEventsDisplay === "hide" && isEventPast(event)) {
+                    return false;
+                }
+
+                return inDateRange;
             })
             .sort((a, b) => {
                 // First sort by date
@@ -407,6 +461,7 @@ const eventList = generateEventList(
     startMonthIndex,
     monthsToShow,
     maxEvents,
+    pastEventsDisplay,
 );
 
 // Generate the specified number of months (only if not in maxEvents mode)
@@ -419,6 +474,7 @@ if (!maxEvents) {
                 monthDate.getFullYear(),
                 monthDate.getMonth(),
                 filteredEvents,
+                pastEventsDisplay,
             ),
         );
     }
@@ -434,6 +490,7 @@ const dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     data-default-view={defaultView}
     data-debug={debug}
     data-disable-links={disableLinks}
+    data-past-events-display={pastEventsDisplay}
 >
     <!-- View Toggle -->
     {
@@ -501,7 +558,7 @@ const dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
                                     <span class="day-number">{day.date}</span>
                                     {day.events.map((event) => (
                                         <div
-                                            class={`event ${!disableLinks && event.url ? "clickable" : ""}`}
+                                            class={`event ${!disableLinks && event.url ? "clickable" : ""} ${pastEventsDisplay === "grey" && isEventPast(event) ? "past-event" : ""}`}
                                             style={
                                                 event.color
                                                     ? `--event-color: ${event.color}`
@@ -603,7 +660,7 @@ const dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
                                     </div>
                                 )}
                                 <div
-                                    class={`list-event ${!disableLinks && event.url ? "clickable" : ""}`}
+                                    class={`list-event ${!disableLinks && event.url ? "clickable" : ""} ${pastEventsDisplay === "grey" && isEventPast(event) ? "past-event" : ""}`}
                                     style={
                                         event.color
                                             ? `--event-color: ${event.color}`
@@ -894,6 +951,35 @@ const dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
     .event.clickable:active {
         transform: translateY(0);
+    }
+
+    /* Past Events */
+    .event.past-event {
+        opacity: 0.5;
+        filter: grayscale(0.3);
+    }
+
+    .event.past-event .event-title,
+    .event.past-event .event-time,
+    .event.past-event .event-location,
+    .event.past-event .event-description {
+        color: color-mix(in srgb, var(--event-color) 60%, #666);
+    }
+
+    .list-event.past-event {
+        opacity: 0.5;
+        filter: grayscale(0.3);
+    }
+
+    .list-event.past-event .event-title,
+    .list-event.past-event .event-time,
+    .list-event.past-event .event-location,
+    .list-event.past-event .event-description {
+        color: color-mix(in srgb, var(--event-color) 60%, #666);
+    }
+
+    .list-event.past-event .event-marker {
+        background-color: color-mix(in srgb, var(--event-color) 60%, #666);
     }
 
     /* List View */
