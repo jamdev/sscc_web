@@ -11,13 +11,10 @@ export default defineConfig({
   site: "https://www.sscc.org.uk/",
   integrations: [mdx(), sitemap()],
   adapter: cloudflare({
-    imageService: "noop",
+    imageService: "passthrough",
     platformProxy: {
       enabled: true,
       configPath: "wrangler.jsonc",
-      persist: {
-        path: "./.cache/wrangler/v3",
-      },
     },
   }),
 });
