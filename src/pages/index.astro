@@ -4,6 +4,7 @@ import Layout from "../layouts/Page.astro";
 import Calendar, { type CalendarEvent } from "../components/Calendar.astro";
 import { events, documents } from "../consts";
 import DocumentList, { type Document } from "../components/DocumentList.astro";
+export const prerender = false;
 ---
 
 <Layout
@@ -59,5 +60,6 @@ import DocumentList, { type Document } from "../components/DocumentList.astro";
         documents={documents}
         categories={["Club documents"]}
         debug={false}
+        client:load
     />
 </Layout>
