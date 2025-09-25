@@ -17,4 +17,12 @@ export default defineConfig({
       configPath: "wrangler.jsonc",
     },
   }),
+  // Ensure asset handling
+  vite: {
+    define: {
+      "process.env.NODE_ENV": JSON.stringify(
+        process.env.NODE_ENV || "production",
+      ),
+    },
+  },
 });
