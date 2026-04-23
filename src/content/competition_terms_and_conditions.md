@@ -19,7 +19,7 @@ By submitting a photograph to our club competitions, you agree to these terms. P
 
 ### Standard Licence 
 
-3.1 By submitting a photo, you grant the club permissiom (a licence) to use that photo in connection with the club. This licence is:
+3.1 By submitting a photo, you grant the club permission (a licence) to use that photo in connection with the club. This licence is:
 
  * world-wide 
  * royalty free (we won't pay you for using the photo)
