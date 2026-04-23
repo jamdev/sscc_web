@@ -6,4 +6,6 @@ This is the Astro website of SSCC.
 
 ``` npx astro build && npx wrangler dev ```
 
+Upload is linked to the github repo
 
+``` git push```
