@@ -11,7 +11,7 @@ export const SITE_DESCRIPTION =
 export const documents: Document[] = [
   {
     name: "Committee",
-    date: "2025-09-10",
+    date: "2025-11-03",
     url: "/documents/committee.docx",
     icon: "/icons/people.svg",
     category: "Club documents",
@@ -19,14 +19,14 @@ export const documents: Document[] = [
   },
   {
     name: "Constitution",
-    date: "2025-09-10",
+    date: "2025-11-03",
     url: "/documents/constitution.docx",
     icon: "/icons/constitution.svg",
     category: "Club documents",
   },
   {
     name: "Privacy notice",
-    date: "2025-09-10",
+    date: "2026-04-25",
     url: "/documents/privacynotice.docx",
     icon: "/icons/privacy.svg",
     category: "Club documents",
